@@ -9,10 +9,9 @@ const {Reader} = require('abif');
 
 let data = fs.readFileSync('./mitochondrion/chromatogram/sample.ab1';
 let reader = Reader(data);
-    console.log('Run start date', reader.getRunStartDate());
-    console.log('Signal to Noise', reader.getData('S/N%', 1));
-    reader.showEntries();
-});
+console.log('Run start date :', reader.getData('RUND', 1));
+console.log('Run start time :', reader.getData('RUNT', 1));
+console.log('Run stop time :', reader.getData('RUNT', 2));
 
 
 Reader class
