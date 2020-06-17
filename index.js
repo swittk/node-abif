@@ -100,7 +100,7 @@ class Reader {
       12: 'Thumb',
       13: 'Bool'
     };
-    console.log('type is ',type);
+    // console.log('type is ',type);
     if (m[type]) {
       return this._loop(m[type], num);
     }
@@ -367,14 +367,6 @@ class DirEntry {
    * */
   mytype() {
     return (this.elementtype < 1024) ? ABIF_TYPES[this.elementtype] || 'unknown' : 'user';
-  }
-
-  /**
-   * 
-   * @param {Buffer} buffer 
-   */
-  getData(buffer) {
-
   }
 }
 
