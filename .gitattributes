@@ -1,0 +1,3 @@
+*.py linguist-detectable=false
+*.pm linguist-detectable=false
+*.js linguist-detectable=true
