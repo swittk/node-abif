@@ -1,4 +1,4 @@
-const {Buffer} = require('buffer');
+const { Buffer } = require('buffer');
 
 const ABIF_TYPES = {
   1: 'byte',
@@ -16,6 +16,30 @@ const ABIF_TYPES = {
   19: 'cString'
 };
 
+class Time {
+  /**
+   * 
+   * @param {Number} hour Number of hours (0-23)
+   * @param {Number} minute Number of minutes (0-60)
+   * @param {Number} second Number of seconds (0-60)
+   * @param {Number} hsecond Number of 0.01 seconds (0-99)
+   */
+  constructor(hour, minute, second, hsecond) {
+    this.hour = hour;
+    this.minute = minute;
+    this.second = second;
+    this.hsecond = hsecond;
+  }
+  toDate() {
+    var d = new Date();
+    d.setHours(this.hour);
+    d.setMinutes(this.minute);
+    d.setSeconds(this.second);
+    d.setMilliseconds(10 * this.hsecond);
+    return d;
+  }
+}
+
 
 class Reader {
   /**
@@ -26,7 +50,7 @@ class Reader {
     this.buf = buf;
     this.pos = 0;
     this.type = this.readNextString(4);
-    if(this.type !== 'ABIF') {
+    if (this.type !== 'ABIF') {
       console.log('this is not abif');
       return;
     }
@@ -77,7 +101,7 @@ class Reader {
   getEntry(name, num) {
     /** @type {DirEntry} */
     var entry;
-  
+
     this.entries.some(function (e) {
       if (e.name === name && e.number === num) {
         entry = e;
@@ -113,6 +137,9 @@ class Reader {
     else if (type === 19) {
       return this.readNextcString(num);
     }
+    else if (type >= 1024) {
+      return this.readNextUser(num);
+    }
     return this[m[type]](num);
   };
 
@@ -125,7 +152,7 @@ class Reader {
   _loop(type, num) {
     let buf = [];
     let method = 'readNext' + type;
-  
+
     for (var i = 0; i < num; i++) {
       buf.push(this[method]());
     }
@@ -187,20 +214,28 @@ class Reader {
     var y = this.readNextShort();
     var m = this.readNextByte();
     var day = this.readNextByte();
-    
+
     console.log(y.m, day);
     d.setYear(y);
     d.setMonth(m);
     d.setDate(day);
     return d;
   };
+  /**
+   * Reads the next time structure in the data.
+   * Note : Time structure has only hours, minutes, seconds, and "hseconds" (0.01 secs)
+   */
   readNextTime() {
-    var d = new Date();
-    d.setHours(this.readNextByte());
-    d.setMinutes(this.readNextByte());
-    d.setSeconds(this.readNextByte());
-    d.setMilliseconds(this.readNextByte());
-    return d;
+    // var d = new Date();
+    // d.setHours(this.readNextByte());
+    // d.setMinutes(this.readNextByte());
+    // d.setSeconds(this.readNextByte());
+    // d.setMilliseconds(10*this.readNextByte());
+    let hour = this.readNextByte();   //hour 0-23
+    let minute = this.readNextByte(); //minute 0-59
+    let second = this.readNextByte(); //second 0-59
+    let hsecond = this.readNextByte(); //0.01 second 0-99
+    return new Time(hour, minute, second, hsecond);
   };
   /**
    * (Legacy) thumbprint data structure, designed as
@@ -252,6 +287,12 @@ class Reader {
       }
     }
   };
+
+  readNextUser(num) {
+    let res = this.buf.slice(this.pos, num);
+    this.pos += num;
+    return res;
+  }
 
   /**
    * @returns {Number} the current read position
@@ -327,7 +368,7 @@ class DirEntry {
      * 
     */
     this.numelements = reader.readNextInt();
-    
+
     /** 
      * @type {Number} SInt32 gives the number of bytes in the data item. 
      * 
@@ -476,7 +517,7 @@ Reader.prototype.getTrace = function (base) {
   //     %ob = $self->order_base();
   //     return $self->analyzed_data_for_channel($ob{uc($base)});
   // }
-  
+
 };
 
 // These are all just simple tag reads.
