@@ -1,3 +1,5 @@
+const {Buffer} = require('buffer');
+
 const ABIF_TYPES = {
   1: 'byte',
   2: 'char',
@@ -14,10 +16,11 @@ const ABIF_TYPES = {
   19: 'cString'
 };
 
+
 class Reader {
   /**
    * 
-   * @param {import('buffer').Buffer} buf 
+   * @param {Buffer} buf 
    */
   constructor(buf) {
     this.buf = buf;
@@ -32,6 +35,9 @@ class Reader {
     var dir = new DirEntry(this);
     this.seek(dir.dataoffset);
 
+    /**
+     * @type {[DirEntry]}
+     */
     this.entries = [];
     for (var i = 0; i <= dir.numelements - 1; i++) {
       var e = new DirEntry(this);
@@ -45,6 +51,11 @@ class Reader {
     });
   };
 
+  /**
+   * Gets the data for a DirEntry with the specified name and num
+   * @param {String} name 
+   * @param {Number} num 
+   */
   getData(name, num) {
     if (num === undefined) {
       num = 1;
@@ -54,12 +65,17 @@ class Reader {
       // throw new Error('Entry ' + name + ' (' +num + ')  not found.');
       return undefined;
     }
-    this.seek(entry.mydataoffset);
-    data = this.readData(entry.elementtype, entry.numelements);
+    this.seek(entry.mydataoffset());
+    let data = this.readData(entry.elementtype, entry.numelements);
     return data.length === 1 ? data[0] : data;
   };
 
+  /**
+   * @param {String} name The name of the DirEntry to search for
+   * @param {Number} num The tag number of the DirEntry to search for
+   */
   getEntry(name, num) {
+    /** @type {DirEntry} */
     var entry;
   
     this.entries.some(function (e) {
@@ -84,7 +100,7 @@ class Reader {
       12: 'Thumb',
       13: 'Bool'
     };
-    
+    console.log('type is ',type);
     if (m[type]) {
       return this._loop(m[type], num);
     }
@@ -103,12 +119,12 @@ class Reader {
 
   /**
    * Called Internally to loop types
-   * @param {String} type 
-   * @param {*} num 
+   * @param {String} type The type to read
+   * @param {Number} num The number of times to loop-read
    */
   _loop(type, num) {
-    var buf = [],
-      method = 'readNext' + type;
+    let buf = [];
+    let method = 'readNext' + type;
   
     for (var i = 0; i < num; i++) {
       buf.push(this[method]());
@@ -160,6 +176,9 @@ class Reader {
     this.pos += 8;
     return v;
   };
+  /**
+   * One-byte boolean value, zero = false, any other value = true
+   */
   readNextBool() {
     return this.readNextByte() === 1;
   };
@@ -183,6 +202,14 @@ class Reader {
     d.setMilliseconds(this.readNextByte());
     return d;
   };
+  /**
+   * (Legacy) thumbprint data structure, designed as
+   * unique file identifier
+   * SInt32 d;
+   * SInt32 u;
+   * UInt8 c;
+   * UInt8 n;
+   */
   readNextThumb() {
     return [
       this.readNextLong(),
@@ -191,22 +218,33 @@ class Reader {
       this.readNextByte()
     ];
   };
-  readNextString = function (size) {
+  /**
+   * Reads string by the specified byte size
+   * @param {Number} size 
+   */
+  readNextString(size) {
     var chars = [];
     for (var i = 0; i <= size - 1; i++) {
       chars.push(this.readNextChar());
     }
     return chars.join('');
   };
+  /**
+   * Pascal string, consisting of a character count (from 0 to 255) 
+   * in the first byte followed by the 8-bit ASCII characters.
+   */
   readNextpString() {
     return this.readNextString(this.readNextByte());
   };
+  /**
+   * Reads a C-String (reads until 0 termination then returns)
+   */
   readNextcString() {
     var chars = [],
       c;
     while (true) {
       c = this.readNextChar();
-      if (c.charAt(0) === 0) {
+      if (c.charAt(0) === '\0') {
         return chars.join('');
       }
       else {
@@ -231,27 +269,112 @@ class Reader {
   };
 }
 
+/**
+ * The next 28 bytes comprise a single directory entry structure 
+ * that points to the directory. 
+ * A directory entry is a packed structure (no padding bytes) 
+ * of the following form
+ * struct DirEntry {
+ *   SInt32 name; //tag name
+ *   SInt32 number; //tag number
+ *   SInt16 elementtype;//element type code 
+ *   SInt16 elementsize;//size in bytes of one element
+ *   SInt32 numelements;//number of elements in item
+ *   SInt32 datasize; //size in bytes of item
+ *   SInt32 dataoffset;  //item’s data, or offset in file
+ *   SInt32 datahandle; //reserved
+ * }
+ * 
+ * Your implementations that read ABIF must extract 
+ * the numelements field, a 32-bit integer at byte18, 
+ * and the dataoffset field, a 32-bit integer at byte 26. 
+ * These specify the number of entries in the directory and 
+ * the location of the directory. The other fields should be ignored
+ */
 class DirEntry {
   /**
    * @param {Reader} reader 
    */
   constructor(reader) {
+    /** @type {String} SInt32 tag name
+     * 
+     * defined as an integer but this field should be treated as an array of four 8-bit ASCII characters
+     */
     this.name = reader.readNextString(4);
+    /** @type {Number} SInt32 tag number */
     this.number = reader.readNextInt();
-
+    /** @type {Number} SInt16 element type code 
+     * 
+     * indicates the type of data contained in the data item
+     * Your implementations should provide for reading all unsupported legacy element types
+     * but only in the form of byte-arrays of raw data.
+    */
     this.elementtype = reader.readNextShort();
+    /** @type {Number} SInt16 size in bytes of one element 
+     * 
+     * For all supported data types, the elementsize field is redundant, 
+     * since the element size for each type is uniquely defined by 
+     * the specification.
+     * 
+     * may ignore on input, but field must be set on output.
+    */
     this.elementsize = reader.readNextShort();
+    /** @type {Number} SInt32 number of elements in item 
+     * 
+     * Gives the number of elements in the data item
+     * 
+     * Note that for the string types, an “element” is an individual character, not the string itself
+     * 
+    */
     this.numelements = reader.readNextInt();
+    
+    /** 
+     * @type {Number} SInt32 gives the number of bytes in the data item. 
+     * 
+     * In implementations that write ABIF, the directory size 
+     * (datasize) should be exactly the size 
+     * required for the entries (numelements x elementsize).
+     * 
+     * In older implementations, there might be other data and size may be larger
+    */
     this.datasize = reader.readNextInt();
+
     this.dataoffsetpos = reader.tell();
+    /** @type {Number} SInt32 item’s data, or offset in file 
+     * 
+     * For data items of size greater than 4 bytes, 
+     * the dataoffset field contains the offset to the data in the file.
+    */
     this.dataoffset = reader.readNextInt();
+    /** @type {Number} SInt32 reserved */
     this.datahandle = reader.readNextInt();
   }
+  /**
+   * For data items of size greater than 4 bytes, 
+   * the dataoffset field contains the offset to the data in the file.
+   * 
+   * For data items of 4 bytes or less, the dataoffset field 
+   * contains the data item itself. In this case, the data bytes 
+   * are stored beginning at the high-order byte of the 32-bit field. 
+   * 
+   */
   mydataoffset() {
     return (this.datasize <= 4) ? this.dataoffsetpos : this.dataoffset;
   }
+  /** 
+   * The 'type' of this entry (e.g. cString, pString, short, etc.)
+   * @returns {String} 
+   * */
   mytype() {
     return (this.elementtype < 1024) ? ABIF_TYPES[this.elementtype] || 'unknown' : 'user';
+  }
+
+  /**
+   * 
+   * @param {Buffer} buffer 
+   */
+  getData(buffer) {
+
   }
 }
 
@@ -361,6 +484,7 @@ Reader.prototype.getTrace = function (base) {
   //     %ob = $self->order_base();
   //     return $self->analyzed_data_for_channel($ob{uc($base)});
   // }
+  
 };
 
 // These are all just simple tag reads.
